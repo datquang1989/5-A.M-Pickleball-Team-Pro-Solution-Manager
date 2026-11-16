@@ -15,6 +15,10 @@ export default async (req) => {
   const configured = pw.length > 0;
   const okPw = configured && given.length > 0 && same(given, pw);
   const url = new URL(req.url);
+  // Tài khoản "Chủ kèo": HOST_PASSWORD, nhiều người ngăn cách bằng dấu phẩy -> h1, h2, ...
+  const hosts = (Netlify.env.get("HOST_PASSWORD") || "").split(",").map((x) => x.trim()).filter(Boolean);
+  const hidx = !okPw && given.length > 0 ? hosts.findIndex((p) => same(given, p)) : -1;
+  const hid = hidx >= 0 ? "h" + (hidx + 1) : null;
 
   if (req.method === "GET") {
     // Kiểm tra mật khẩu khi đăng nhập
@@ -22,20 +26,64 @@ export default async (req) => {
       if (configured && !okPw) await wait(800); // làm chậm dò mật khẩu (kể cả khi là thủ quỹ, chỉ chậm thêm chút)
       const tp = (Netlify.env.get("TREASURER_PASSWORD") || "").trim();
       const okT = !okPw && tp.length > 0 && given.length > 0 && same(given, tp);
-      return Response.json({ configured, ok: okPw || okT, role: okPw ? "admin" : okT ? "treasurer" : null }, { headers: NS });
+      const okH = !okPw && !okT && hid;
+      return Response.json({ configured, ok: okPw || okT || !!okH, role: okPw ? "admin" : okT ? "treasurer" : okH ? "host" : null, hid: okH ? hid : undefined }, { headers: NS });
     }
     const d = await store.get("state", { type: "json" });
     return Response.json(d || null, { headers: NS });
   }
 
   if (req.method === "POST") {
-    if (!okPw) {
+    if (!okPw && !hid) {
       if (configured) await wait(800);
       return new Response("forbidden", { status: 403 });
     }
     const b = await req.json().catch(() => null);
+    if (!okPw) {
+      // Chủ kèo: chỉ được thêm/sửa/xoá Mini game, Giải đấu và Thách đấu do chính mình tạo; mọi dữ liệu khác giữ nguyên bản trên máy chủ
+      if (!b || !Array.isArray(b.events)) return new Response("bad request", { status: 400 });
+      const cur = await store.get("state", { type: "json" });
+      if (!cur || !Array.isArray(cur.members)) return new Response("no base state", { status: 409 });
+      const del = b.hdel || {};
+      const merge = (curL, newL, dl, ok) => {
+        curL = Array.isArray(curL) ? curL : [];
+        newL = Array.isArray(newL) ? newL : [];
+        const dset = new Set((Array.isArray(dl) ? dl : []).map(String));
+        const byId = new Map(newL.map((x) => [String(x && x.id), x]));
+        const ids = new Set(curL.map((x) => String(x.id)));
+        const out = [];
+        for (const x of curL) {
+          if (x.own !== hid) { out.push(x); continue; }
+          if (dset.has(String(x.id))) continue;
+          const n = byId.get(String(x.id));
+          out.push(n && ok(n, x) ? { ...n, id: x.id, own: hid } : x);
+        }
+        for (const n of newL) {
+          if (n && n.id != null && !ids.has(String(n.id)) && n.own === hid && ok(n, null)) out.push({ ...n, own: hid });
+        }
+        return out;
+      };
+      const evOk = (n, old) => (n.kind === "mini" || n.kind === "giai") && (!old || old.kind === n.kind);
+      const next = { ...cur, events: merge(cur.events, b.events, del.e, evOk), bets: merge(cur.bets, b.bets, del.b, () => true) };
+      if (JSON.stringify(next).length > 4_000_000) return new Response("too large", { status: 413 });
+      await store.setJSON("state", next);
+      return Response.json({ ok: true });
+    }
     if (!b || !Array.isArray(b.members) || !Array.isArray(b.events)) return new Response("bad request", { status: 400 });
-    await store.setJSON("state", b);
+    // Giữ lại Mini game / Giải đấu / Thách đấu do Chủ kèo vừa tạo mà bản của quản trị (đang mở từ trước) chưa có, trừ khi quản trị chủ động xoá
+    const { hdel, ...rest } = b;
+    const cur = await store.get("state", { type: "json" });
+    if (cur) {
+      const keep = (curL, newL, dl) => {
+        const ids = new Set((Array.isArray(newL) ? newL : []).map((x) => String(x && x.id)));
+        const d = new Set((Array.isArray(dl) ? dl : []).map(String));
+        return (Array.isArray(curL) ? curL : []).filter((x) => x && x.own && !ids.has(String(x.id)) && !d.has(String(x.id)));
+      };
+      const dl = hdel || {};
+      rest.events = [...rest.events, ...keep(cur.events, rest.events, dl.e)];
+      rest.bets = [...(Array.isArray(rest.bets) ? rest.bets : []), ...keep(cur.bets, rest.bets, dl.b)];
+    }
+    await store.setJSON("state", rest);
     return Response.json({ ok: true });
   }
   return new Response("method not allowed", { status: 405 });
