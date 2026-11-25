@@ -64,15 +64,19 @@ export default async (req) => {
         return out;
       };
       const evOk = (n, old) => (n.kind === "mini" || n.kind === "giai") && (!old || old.kind === n.kind);
-      const next = { ...cur, events: merge(cur.events, b.events, del.e, evOk), bets: merge(cur.bets, b.bets, del.b, () => true) };
+      const next = { ...cur, events: merge(cur.events, b.events, del.e, evOk), bets: merge(cur.bets, b.bets, del.b, () => true), _rev: ((cur && cur._rev) || 0) + 1 };
       if (JSON.stringify(next).length > 4_000_000) return new Response("too large", { status: 413 });
       await store.setJSON("state", next);
-      return Response.json({ ok: true });
+      return Response.json({ ok: true, rev: next._rev });
     }
     if (!b || !Array.isArray(b.members) || !Array.isArray(b.events)) return new Response("bad request", { status: 400 });
     // Giữ lại Mini game / Giải đấu / Thách đấu do Chủ kèo vừa tạo mà bản của quản trị (đang mở từ trước) chưa có, trừ khi quản trị chủ động xoá
     const { hdel, ...rest } = b;
     const cur = await store.get("state", { type: "json" });
+    // Chống ghi đè bằng bản cũ: máy khách phải gửi đúng số phiên bản (_rev) đang lưu trên máy chủ
+    const curRev = (cur && cur._rev) || 0;
+    if (cur && cur._rev != null && Number(rest._rev) !== curRev) return Response.json({ conflict: true, rev: curRev }, { status: 409, headers: NS });
+    rest._rev = curRev + 1;
     if (cur) {
       const keep = (curL, newL, dl) => {
         const ids = new Set((Array.isArray(newL) ? newL : []).map((x) => String(x && x.id)));
@@ -84,7 +88,7 @@ export default async (req) => {
       rest.bets = [...(Array.isArray(rest.bets) ? rest.bets : []), ...keep(cur.bets, rest.bets, dl.b)];
     }
     await store.setJSON("state", rest);
-    return Response.json({ ok: true });
+    return Response.json({ ok: true, rev: rest._rev });
   }
   return new Response("method not allowed", { status: 405 });
 };

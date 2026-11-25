@@ -36,7 +36,18 @@ export default async (req) => {
         return new Response("bad request", { status: 400 });
       tx.push({ id: str(t.id, 40), date: t.date, type: t.type, cat: str(t.cat, 20), amt: Math.round(t.amt), note: str(t.note, 200), who: str(t.who, 80), ts: Number(t.ts) || 0, upd: Number(t.upd) || 0 });
     }
-    const out = { open: b.open ? { ym: b.open.ym, amt: Math.round(b.open.amt) } : null, tx, rev: curRev + 1, upd: Date.now() };
+    // Nhật ký bóng pickleball (v37). Máy khách cũ không gửi balls thì giữ nguyên bản đang lưu.
+    let balls = (cur && Array.isArray(cur.balls)) ? cur.balls : [];
+    if (b.balls != null) {
+      if (!Array.isArray(b.balls) || b.balls.length > 5000) return new Response("bad request", { status: 400 });
+      balls = [];
+      for (const x of b.balls) {
+        if (!x || !/^\d{4}-\d{2}-\d{2}$/.test(x.date || "") || !["nhap", "hong", "kiemke"].includes(x.type) || !Number.isInteger(x.qty) || x.qty < 0 || x.qty > 99999)
+          return new Response("bad request", { status: 400 });
+        balls.push({ id: str(x.id, 40), date: x.date, type: x.type, qty: x.qty, note: str(x.note, 200), who: str(x.who, 80), ts: Number(x.ts) || 0 });
+      }
+    }
+    const out = { open: b.open ? { ym: b.open.ym, amt: Math.round(b.open.amt) } : null, tx, balls, rev: curRev + 1, upd: Date.now() };
     await store.setJSON("fund", out);
     return Response.json({ ok: true, rev: out.rev });
   }
