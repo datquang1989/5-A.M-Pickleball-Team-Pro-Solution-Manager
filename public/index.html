@@ -727,7 +727,7 @@ const evCmp=(a,b)=>a.date<b.date?1:a.date>b.date?-1:(SO[b.session]||0)-(SO[a.ses
 const TL={...TYPES.mini,...TYPES.giai,noi:'Đánh nối',wc:'WC rally',open:'Giải tự do'},FM={db:'Dreambreaker',dm:'Đôi nam',df:'Đôi nữ',mx:'Đôi nam nữ',dx:'Đôi hỗn hợp',sn:'Đơn nam',sf:'Đơn nữ',s:'Đơn',noi:'Đánh nối',wc:'Đánh WC'},SL={db:[],dm:['M','M'],df:['F','F'],mx:['M','F'],dx:[null,null],sn:['M'],sf:['F'],s:[null],noi:[],wc:[]},ST={upcoming:'Sắp diễn ra',live:'Đang diễn ra',done:'Đã diễn ra'};
 const $=s=>document.querySelector(s),esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 let S=(()=>{try{const j=localStorage.getItem('p5am2');if(j)return JSON.parse(j)}catch(e){}return JSON.parse(JSON.stringify(SEED))})();
-const APP_VER='v40',APP_DATE='25/11/2026';
+const APP_VER='v41',APP_DATE='25/11/2026';
 const curMonth=()=>{const t=new Date();return t.getFullYear()+'-'+String(t.getMonth()+1).padStart(2,'0')};
 let ui={role:'',fm:curMonth(),fd:null,fe:null,fa:null,fs:'',ferr:'',mo:curMonth(),bx:{F:false,M:false},tab:'tong',ev:null,mem:null,draft:null,armed:null,io:''};
 const isHost=()=>ui.api&&ui.role=='host',HOSTTABS=['mini','giai','do'],mineO=o=>!!o&&!!o.own&&o.own==ui.hid,HD=()=>ui.hdel||(ui.hdel={e:[],b:[]}),OWN=()=>isHost()?{own:ui.hid}:{};
@@ -735,20 +735,23 @@ const RO=()=>{if(!ui.api||ui.adm)return false;if(isHost()&&HOSTTABS.includes(ui.
 /* ===== v38: đồng bộ an toàn (hàng đợi, tự thử lại, gộp xung đột, tự làm mới) ===== */
 let inflight=0,dirty=0,fails=0,base=null,retryT=null,cfl=0;
 const cp=o=>JSON.parse(JSON.stringify(o));
-const setWarn=on=>{let el=document.getElementById('syncwarn');if(!on){if(el)el.remove();return}if(!el){el=document.createElement('div');el.id='syncwarn';el.style.cssText='position:fixed;left:8px;right:8px;bottom:8px;z-index:99;background:#B71C1C;color:#fff;border-radius:12px;padding:10px 12px;font:700 13px system-ui;box-shadow:0 6px 20px #0006;text-align:center;cursor:pointer';el.onclick=()=>{fails=0;flushNow()};document.body.appendChild(el)}el.textContent='⚠ Chưa lưu được lên máy chủ — đang tự thử lại. Bấm để thử ngay (đừng đóng trang).'};
+const setWarn=on=>{let el=document.getElementById('syncwarn');if(!on){if(el)el.remove();return}if(!el){el=document.createElement('div');el.id='syncwarn';el.style.cssText='position:fixed;left:8px;right:8px;bottom:8px;z-index:99;background:#B71C1C;color:#fff;border-radius:12px;padding:10px 12px;font:700 13px system-ui;box-shadow:0 6px 20px #0006;text-align:center;cursor:pointer';el.onclick=()=>retryNow();document.body.appendChild(el)}el.textContent='⚠ Chưa lưu được lên máy chủ'+(why?' ('+why+')':'')+' — đang tự thử lại. Bấm để thử ngay (đừng đóng trang).'};
+let why='';
+function retryNow(){fails=0;cfl=0;inflight=0;dirty=1;why='';clearTimeout(tmr);clearTimeout(retryT);const el=document.getElementById('syncwarn');if(el)el.textContent='⏳ Đang lưu lên máy chủ…';flushNow()}
 function merge3(b,l,sv){const out=cp(sv);b=b||{};new Set([...Object.keys(l),...Object.keys(b)]).forEach(k=>{if(k=='_rev')return;const bl=b[k],lv=l[k];if(JSON.stringify(bl)===JSON.stringify(lv))return;
   if(Array.isArray(lv)&&lv.every(x=>x&&x.id!=null)&&(bl==null||Array.isArray(bl))){const bm=new Map((bl||[]).map(x=>[String(x.id),x])),lm=new Map(lv.map(x=>[String(x.id),x]));let arr=Array.isArray(out[k])?out[k]:[];
    bm.forEach((x,id)=>{if(!lm.has(id))arr=arr.filter(y=>String(y.id)!=id)});
    lv.forEach(x=>{const id=String(x.id),o=bm.get(id);if(!o||JSON.stringify(o)!==JSON.stringify(x)){const q=arr.findIndex(y=>String(y.id)==id);if(q>=0)arr[q]=x;else arr.push(x)}});out[k]=arr}
   else out[k]=lv});out._rev=sv._rev;return out}
-async function resolveConflict(){try{const sv=await fetch('/api/state',{cache:'no-store'}).then(r=>r.json());if(!sv||!sv.members)throw 0;S=merge3(base||sv,S,sv);base=cp(sv);dirty=1;try{localStorage.setItem('p5am2',JSON.stringify(S))}catch(e){}ui.sync='Đã gộp thay đổi từ thiết bị khác';render();flushNow()}catch(e){dirty=1;fails++;setWarn(1);retryT=setTimeout(flushNow,3000)}}
+async function resolveConflict(){try{const sv=await fetch('/api/state',{cache:'no-store'}).then(r=>r.json());if(!sv||!sv.members)throw 0;S=merge3(base||sv,S,sv);base=cp(sv);dirty=1;try{localStorage.setItem('p5am2',JSON.stringify(S))}catch(e){}ui.sync='Đã gộp thay đổi từ thiết bị khác';render();flushNow()}catch(e){dirty=1;fails++;why='không tải được dữ liệu máy chủ để gộp';setWarn(1);retryT=setTimeout(flushNow,3000)}}
 const push=()=>{dirty=1;clearTimeout(tmr);pend=1;tmr=setTimeout(flushNow,600)};
 function flushNow(){clearTimeout(tmr);clearTimeout(retryT);pend=0;if(inflight||!dirty||!(ui.api&&(ui.adm||isHost())))return;inflight=1;dirty=0;const hd=cp(HD()),sent=cp(S),body=JSON.stringify({...sent,hdel:hd});
- fetch('/api/state',{method:'POST',keepalive:body.length<60000,headers:{'x-admin':encodeURIComponent(ui.pw),'content-type':'application/json'},body}).then(async r=>{inflight=0;
-  if(r.status==409){cfl++;if(cfl>4){ui.sync='Xung đột dữ liệu';setWarn(1);render();return}await resolveConflict();return}
+ const ac=new AbortController(),tmo=setTimeout(()=>{why='quá thời gian chờ';ac.abort()},25000);
+ fetch('/api/state',{method:'POST',signal:ac.signal,keepalive:body.length<60000,headers:{'x-admin':encodeURIComponent(ui.pw),'content-type':'application/json'},body}).then(async r=>{clearTimeout(tmo);inflight=0;why='';
+  if(r.status==409){cfl++;if(cfl>4){dirty=1;why='xung đột dữ liệu';ui.sync='Xung đột dữ liệu';setWarn(1);render();retryT=setTimeout(()=>{cfl=0;flushNow()},8000);return}await resolveConflict();return}
   if(r.status==403){dirty=0;ui.adm=false;ui.role='';ui.hid='';ui.pw='';try{sessionStorage.removeItem(PWK)}catch(e){}setWarn(0);alert('Phiên quản trị không còn hợp lệ (mật khẩu đã đổi hoặc sai), thay đổi vừa rồi CHƯA được lưu lên máy chủ. Hãy đăng nhập lại.');pull();ui.sync='Lỗi đồng bộ';return}
-  if(!r.ok)throw 0;const j=await r.json();cfl=0;fails=0;setWarn(0);if(j.rev!=null){S._rev=j.rev;sent._rev=j.rev}base=sent;ui.sync='Đã đồng bộ';ui.hdel={e:HD().e.filter(x=>!hd.e.includes(x)),b:HD().b.filter(x=>!hd.b.includes(x))};
-  if(dirty){flushNow();return}if(isHost()&&!pend)return pull();render()}).catch(()=>{inflight=0;dirty=1;fails++;ui.sync='Lỗi đồng bộ';setWarn(1);render();retryT=setTimeout(flushNow,Math.min(30000,2000*Math.pow(2,fails-1)))})}
+  if(!r.ok){why='lỗi máy chủ '+r.status;throw 0}const j=await r.json();cfl=0;fails=0;setWarn(0);if(j.rev!=null){S._rev=j.rev;sent._rev=j.rev}base=sent;ui.sync='Đã đồng bộ';ui.hdel={e:HD().e.filter(x=>!hd.e.includes(x)),b:HD().b.filter(x=>!hd.b.includes(x))};
+  if(dirty){flushNow();return}if(isHost()&&!pend)return pull();render()}).catch(e=>{clearTimeout(tmo);inflight=0;dirty=1;fails++;if(!why)why=navigator.onLine===false?'mất mạng':'không kết nối được';ui.sync='Lỗi đồng bộ';setWarn(1);render();retryT=setTimeout(flushNow,Math.min(30000,2000*Math.pow(2,fails-1)))})}
 const softPull=()=>{if(!ui.api||pend||inflight||dirty||document.hidden)return;const a=document.activeElement;if(a&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName))return;
  fetch('/api/state',{cache:'no-store'}).then(r=>r.ok?r.json():Promise.reject()).then(j=>{if(!j||!j.members||pend||inflight||dirty)return;if(JSON.stringify(j)===JSON.stringify(S))return;S=j;base=cp(j);try{localStorage.setItem('p5am2',JSON.stringify(S))}catch(e){}if(ui.ev&&!S.events.some(x=>x.id==ui.ev))ui.ev=null;render()}).catch(()=>{})};
 const save=()=>{try{localStorage.setItem('p5am2',JSON.stringify(S));ui.nosave=0}catch(e){ui.nosave=1}if(ui.api&&(ui.adm||isHost()))push()};
